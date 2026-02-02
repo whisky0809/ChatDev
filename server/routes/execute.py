@@ -28,6 +28,7 @@ async def execute_workflow(request: WorkflowRequest):
                 manager,
                 attachments=request.attachments,
                 log_level=log_level,
+                workspace=request.workspace,
             )
         )
 

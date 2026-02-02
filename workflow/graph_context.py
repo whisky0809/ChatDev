@@ -4,7 +4,8 @@ This module stores execution-time state and business logic for graphs.
 """
 
 from datetime import datetime
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -33,15 +34,20 @@ class GraphContext:
         depth: Graph depth
     """
     
-    def __init__(self, config: GraphConfig) -> None:
+    def __init__(
+        self,
+        config: GraphConfig,
+        workspace: Optional[Path] = None,
+    ) -> None:
         """Initialize the graph context.
-        
+
         Args:
             config: Graph configuration
+            workspace: Optional path to existing workspace directory to use
         """
         self.config = config
         self.vars: Dict[str, Any] = dict(config.vars)
-        
+
         # Graph structure
         self.nodes: Dict[str, Node] = {}
         self.edges: List[Dict[str, Any]] = []
@@ -50,22 +56,25 @@ class GraphContext:
         self.depth: int = 0
         self.start_nodes: List[str] = []
         self.explicit_start_nodes: List[str] = []
-        
+
         # Runtime state
         self.outputs: Dict[str, str] = {}
         self.subgraphs: Dict[str, "GraphContext"] = {}
-        
+
         # Cycle support
         self.has_cycles: bool = False
         self.cycle_execution_order: List[Dict[str, Any]] = []
-        
+
         # Output directory
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        fixed_output_dir = bool(config.metadata.get("fixed_output_dir"))
-        if fixed_output_dir or "session_" in config.name:
-            self.directory = config.output_root / config.name
+        if workspace:
+            self.directory = Path(workspace)
         else:
-            self.directory = config.output_root / f"{config.name}_{timestamp}"
+            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+            fixed_output_dir = bool(config.metadata.get("fixed_output_dir"))
+            if fixed_output_dir or "session_" in config.name:
+                self.directory = config.output_root / config.name
+            else:
+                self.directory = config.output_root / f"{config.name}_{timestamp}"
         self.directory.mkdir(parents=True, exist_ok=True)
         # Voting mode flag
         self.is_majority_voting: bool = config.is_majority_voting

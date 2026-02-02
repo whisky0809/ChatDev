@@ -24,7 +24,26 @@ class AttachmentService:
         env_flag = os.environ.get("MAC_AUTO_CLEAN_ATTACHMENTS", "0").strip().lower()
         self.clean_on_cleanup = env_flag in {"1", "true", "yes"}
 
-    def prepare_session_workspace(self, session_id: str) -> Path:
+    def prepare_session_workspace(
+        self,
+        session_id: str,
+        workspace: Optional[Path] = None,
+    ) -> Path:
+        """Prepare and return the attachments directory for a session.
+
+        Args:
+            session_id: The session identifier.
+            workspace: Optional custom workspace path. If provided, attachments
+                will be stored in workspace/attachments instead of the default
+                session directory.
+
+        Returns:
+            The path to the attachments directory.
+        """
+        if workspace:
+            attachments_path = workspace / "attachments"
+            attachments_path.mkdir(parents=True, exist_ok=True)
+            return attachments_path
         return self._session_attachments_path(session_id, create=True)
 
     def cleanup_session(self, session_id: str) -> None:

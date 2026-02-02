@@ -62,6 +62,7 @@ class WorkflowRunService:
         *,
         attachments: Optional[List[str]] = None,
         log_level: Optional[LogLevel] = None,
+        workspace: Optional[str] = None,
     ) -> None:
         normalized_yaml_name = (yaml_file or "").strip()
         try:
@@ -75,7 +76,8 @@ class WorkflowRunService:
                     details={"task_prompt_provided": bool(task_prompt)},
                 )
 
-            self.attachment_service.prepare_session_workspace(session_id)
+            resolved_workspace = self._resolve_workspace(workspace) if workspace else None
+            self.attachment_service.prepare_session_workspace(session_id, workspace=resolved_workspace)
             self.session_store.create_session(
                 yaml_file=normalized_yaml_name,
                 task_prompt=task_prompt,
@@ -99,6 +101,7 @@ class WorkflowRunService:
                 websocket_manager,
                 attachments,
                 log_level,
+                resolved_workspace,
             )
         except ValidationError as exc:
             self.logger.error(str(exc))
@@ -141,6 +144,7 @@ class WorkflowRunService:
         websocket_manager,
         attachments: List[str],
         log_level: LogLevel,
+        workspace: Optional[Path] = None,
     ) -> None:
         session = self.session_store.get_session(session_id)
         cancel_event = session.cancel_event if session else None
@@ -156,7 +160,7 @@ class WorkflowRunService:
             if log_level:
                 graph_config.log_level = log_level
                 graph_config.definition.log_level = log_level
-            graph_context = GraphContext(config=graph_config)
+            graph_context = GraphContext(config=graph_config, workspace=workspace)
 
             executor = WebSocketGraphExecutor(
                 graph_context,
@@ -293,3 +297,49 @@ class WorkflowRunService:
         if not yaml_path.exists():
             raise ValidationError("YAML file not found", details={"yaml_file": safe_name})
         return yaml_path
+
+    def _resolve_workspace(self, workspace: str) -> Path:
+        """Resolve and validate workspace path.
+
+        Always resolves paths relative to WARE_HOUSE_DIR to prevent directory traversal.
+        Creates the workspace directory if it doesn't exist.
+
+        Args:
+            workspace: Workspace name (relative to WareHouse directory)
+
+        Returns:
+            Resolved absolute Path to the workspace directory
+
+        Raises:
+            ValidationError: If workspace name is invalid or escapes WareHouse
+        """
+        if not workspace or not workspace.strip():
+            raise ValidationError("Workspace name cannot be empty")
+
+        workspace = workspace.strip()
+
+        # Block dangerous patterns
+        if workspace in {".", ".."}:
+            raise ValidationError("Invalid workspace name")
+
+        # Block invalid filesystem characters
+        if any(c in workspace for c in '<>:"|?*\0\\'):
+            raise ValidationError(
+                "Workspace name contains invalid characters",
+                details={"workspace": workspace},
+            )
+
+        # Always resolve relative to WARE_HOUSE_DIR (prevents absolute path injection)
+        workspace_path = (WARE_HOUSE_DIR / workspace).resolve()
+
+        # Security: Ensure resolved path is still within WARE_HOUSE_DIR
+        try:
+            workspace_path.relative_to(WARE_HOUSE_DIR.resolve())
+        except ValueError:
+            raise ValidationError(
+                "Workspace path must be within WareHouse directory",
+                details={"workspace": workspace},
+            )
+
+        workspace_path.mkdir(parents=True, exist_ok=True)
+        return workspace_path

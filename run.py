@@ -72,6 +72,12 @@ def parse_arguments():
         default=[],
         help="Path to a file to attach to the initial user message (repeatable)",
     )
+    parser.add_argument(
+        "--workspace",
+        type=Path,
+        default=None,
+        help="Path to existing workspace directory to use (instead of creating new)",
+    )
     return parser.parse_args()
 
 def main() -> None:
@@ -106,7 +112,7 @@ def main() -> None:
         source_path=str(args.path),
         vars=design.vars,
     )
-    graph_context = GraphContext(config=graph_config)
+    graph_context = GraphContext(config=graph_config, workspace=args.workspace)
 
     task_input = build_task_input_payload(
         graph_context,

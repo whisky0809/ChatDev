@@ -12,6 +12,20 @@ ProviderRegistry.register(
 )
 
 try:
+    from runtime.node.agent.providers.moonshot_provider import MoonshotProvider
+except ImportError:
+    MoonshotProvider = None
+
+if MoonshotProvider is not None:
+    ProviderRegistry.register(
+        "moonshot",
+        MoonshotProvider,
+        label="Moonshot AI",
+        summary="Moonshot AI (Kimi) models via the OpenAI-compatible chat completions API",
+    )
+
+# Gemini provider (optional dependency)
+try:
     from runtime.node.agent.providers.gemini_provider import GeminiProvider
 except ImportError:
     GeminiProvider = None

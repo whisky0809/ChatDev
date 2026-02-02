@@ -130,6 +130,60 @@ class WebSocketManager:
         else:
             logging.warning("Heartbeat request from disconnected session: %s", session_id)
 
+    async def send_tool_stream_output(
+        self,
+        session_id: str,
+        node_id: str,
+        tool_name: str,
+        chunk: str,
+        is_stderr: bool = False,
+    ) -> None:
+        """Send streaming output from a tool execution to the frontend.
+
+        Args:
+            session_id: The WebSocket session ID
+            node_id: The ID of the node executing the tool
+            tool_name: The name of the tool being executed
+            chunk: The output chunk to send
+            is_stderr: Whether this chunk is from stderr
+        """
+        await self.send_message(
+            session_id,
+            {
+                "type": "tool_stream_output",
+                "data": {
+                    "node_id": node_id,
+                    "tool_name": tool_name,
+                    "chunk": chunk,
+                    "is_stderr": is_stderr,
+                },
+            },
+        )
+
+    def send_tool_stream_output_sync(
+        self,
+        session_id: str,
+        node_id: str,
+        tool_name: str,
+        chunk: str,
+        is_stderr: bool = False,
+    ) -> None:
+        """Synchronous wrapper for send_tool_stream_output."""
+        try:
+            loop = asyncio.get_running_loop()
+            if loop.is_running():
+                asyncio.create_task(
+                    self.send_tool_stream_output(session_id, node_id, tool_name, chunk, is_stderr)
+                )
+            else:
+                asyncio.run(
+                    self.send_tool_stream_output(session_id, node_id, tool_name, chunk, is_stderr)
+                )
+        except RuntimeError:
+            asyncio.run(
+                self.send_tool_stream_output(session_id, node_id, tool_name, chunk, is_stderr)
+            )
+
     async def handle_message(self, session_id: str, message: str) -> None:
         try:
             data = json.loads(message)

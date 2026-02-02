@@ -6,6 +6,7 @@ from typing import List
 from utils.logger import WorkflowLogger
 from workflow.graph import GraphExecutor
 from workflow.graph_context import GraphContext
+from runtime.node.executor.base import ExecutionContext
 
 from server.services.attachment_service import AttachmentService
 from server.services.artifact_dispatcher import ArtifactDispatcher
@@ -61,6 +62,14 @@ class WebSocketGraphExecutor(GraphExecutor):
         from server.services.websocket_logger import WebSocketLogger
 
         return WebSocketLogger(self.websocket_manager, self.session_id, self.graph.name, self.graph.log_level)
+
+    def _get_execution_context(self) -> ExecutionContext:
+        """Override to inject websocket_manager into global_state."""
+        context = super()._get_execution_context()
+        # Inject websocket_manager so tools can send streaming output
+        context.global_state["websocket_manager"] = self.websocket_manager
+        context.global_state["session_id"] = self.session_id
+        return context
 
     async def execute_graph_async(self, task_prompt):
         await asyncio.get_event_loop().run_in_executor(None, self._execute, task_prompt)

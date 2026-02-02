@@ -306,6 +306,34 @@ export async function fetchVueGraph(key) {
   }
 }
 
+// Fetch available workspaces
+export async function fetchWorkspaces() {
+  try {
+    const response = await fetch(apiUrl('/api/workspaces'))
+    const data = await response.json().catch(() => ({}))
+
+    if (response.ok) {
+      return {
+        success: true,
+        workspaces: data?.workspaces || []
+      }
+    }
+
+    return {
+      success: false,
+      detail: data?.detail,
+      message: data?.message || 'Failed to fetch workspaces'
+    }
+  } catch (error) {
+    console.error('Error fetching workspaces:', error)
+    return {
+      success: false,
+      message: 'API error',
+      workspaces: []
+    }
+  }
+}
+
 // Save the VueFlow graph
 export async function postVuegraphs({ filename, content }) {
   try {

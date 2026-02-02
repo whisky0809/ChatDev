@@ -598,13 +598,17 @@ class AgentNodeExecutor(NodeExecutor):
                         {"arguments": arguments},
                         CallStage.BEFORE,
                     )
+                    # Prepare tool context with cancel_event for streaming support
+                    tool_ctx = dict(self.context.global_state) if self.context.global_state else {}
+                    if self.context.cancel_event is not None:
+                        tool_ctx["cancel_event"] = self.context.cancel_event
                     with self.log_manager.tool_timer(node.id, tool_name):
                         result = asyncio.run(
                             self.tool_manager.execute_tool(
                                 execution_name,
                                 arguments,
                                 tool_config,
-                                tool_context=self.context.global_state,
+                                tool_context=tool_ctx,
                             )
                         )
 

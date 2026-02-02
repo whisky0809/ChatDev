@@ -70,16 +70,34 @@
                     <div
                       v-for="entry in message.loadingEntries"
                       :key="entry.key"
-                      class="loading-entry"
-                      :class="{
-                        'entry-running': entry.status === 'running',
-                        'entry-done': entry.status === 'done'
-                      }"
+                      class="loading-entry-wrapper"
                     >
-                      <span class="loading-entry-label">{{ entry.label }}</span>
-                      <span class="loading-entry-duration">
-                        {{ formatDuration(entry.startedAt, entry.endedAt || null) }}
-                      </span>
+                      <div
+                        class="loading-entry"
+                        :class="{
+                          'entry-running': entry.status === 'running',
+                          'entry-done': entry.status === 'done',
+                          'entry-has-output': entry.totalOutput
+                        }"
+                        @click="entry.totalOutput && (entry.isExpanded = !entry.isExpanded)"
+                      >
+                        <span class="loading-entry-label">{{ entry.label }}</span>
+                        <span class="loading-entry-duration">
+                          {{ formatDuration(entry.startedAt, entry.endedAt || null) }}
+                        </span>
+                        <span
+                          v-if="entry.totalOutput"
+                          class="loading-entry-toggle"
+                        >
+                          {{ entry.isExpanded ? '▼' : '▶' }}
+                        </span>
+                      </div>
+                      <div
+                        v-if="entry.isExpanded && entry.totalOutput"
+                        class="live-output-panel"
+                      >
+                        <pre>{{ entry.totalOutput }}</pre>
+                      </div>
                     </div>
                   </TransitionGroup>
 
@@ -380,6 +398,56 @@
         </Transition>
       </div>
 
+          <label class="section-label">Workspace (Optional)</label>
+      <div
+        class="select-wrapper custom-file-selector"
+        ref="workspaceSelectorWrapperRef"
+      >
+        <input
+          ref="workspaceSelectorInputRef"
+          v-model="workspaceSearchQuery"
+          type="text"
+          class="file-selector-input"
+          placeholder="Select or enter workspace name..."
+          :disabled="isWorkflowRunning"
+          @focus="handleWorkspaceInputFocus"
+          @input="handleWorkspaceInputChange"
+          @keydown.enter.prevent="handleWorkspaceInputEnter"
+          @blur="handleWorkspaceInputBlur"
+        />
+        <div class="select-arrow">▼</div>
+        <Transition name="file-dropdown">
+          <ul
+            v-if="isWorkspaceDropdownOpen"
+            class="file-dropdown"
+          >
+            <li
+              v-if="workspaceSearchQuery.trim()"
+              class="file-option file-option-new"
+              @mousedown.prevent="selectWorkspace(workspaceSearchQuery.trim())"
+            >
+              <span class="file-name">Use "{{ workspaceSearchQuery.trim() }}"</span>
+              <span class="file-desc">Create or use this workspace</span>
+            </li>
+            <li
+              v-for="workspace in filteredWorkspaces"
+              :key="workspace"
+              class="file-option"
+              @mousedown.prevent="selectWorkspace(workspace)"
+            >
+              <span class="file-name">{{ workspace }}</span>
+              <span class="file-desc">Existing workspace</span>
+            </li>
+            <li
+              v-if="!filteredWorkspaces.length && !workspaceSearchQuery.trim()"
+              class="file-empty"
+            >
+              No existing workspaces
+            </li>
+          </ul>
+        </Transition>
+      </div>
+
           <label class="section-label">Status</label>
           <div class="status-display" :class="{ 'status-active': status === 'Running...' }">
             {{ status }}
@@ -459,7 +527,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { fetchWorkflowsWithDesc, fetchLogsZip, fetchWorkflowYAML, postFile, getAttachment, fetchVueGraph } from '../utils/apiFunctions.js'
+import { fetchWorkflowsWithDesc, fetchLogsZip, fetchWorkflowYAML, postFile, getAttachment, fetchVueGraph, fetchWorkspaces } from '../utils/apiFunctions.js'
 import { configStore } from '../utils/configStore.js'
 import { spriteFetcher } from '../utils/spriteFetcher.js'
 import yaml from 'js-yaml'
@@ -505,6 +573,15 @@ const isFileSearchDirty = ref(false)
 const isFileDropdownOpen = ref(false)
 const fileSelectorWrapperRef = ref(null)
 const fileSelectorInputRef = ref(null)
+
+// Workspace selector state
+const workspaces = ref([])
+const selectedWorkspace = ref('')
+const workspaceSearchQuery = ref('')
+const isWorkspaceSearchDirty = ref(false)
+const isWorkspaceDropdownOpen = ref(false)
+const workspaceSelectorWrapperRef = ref(null)
+const workspaceSelectorInputRef = ref(null)
 
 // Status state
 const status = ref('Waiting for workflow selection...')
@@ -575,7 +652,10 @@ const addLoadingEntry = (nodeId, baseKey, label) => {
     label,
     status: 'running',
     startedAt: Date.now(),
-    endedAt: null
+    endedAt: null,
+    liveOutput: [],
+    isExpanded: false,
+    totalOutput: ''
   }
 
   nodeState.entryMap.set(key, entry)
@@ -661,6 +741,16 @@ const filteredWorkflowFiles = computed(() => {
   }
   return workflowFiles.value.filter((workflow) =>
     workflow.name?.toLowerCase().includes(query)
+  )
+})
+
+const filteredWorkspaces = computed(() => {
+  const query = workspaceSearchQuery.value.trim().toLowerCase()
+  if (!query) {
+    return workspaces.value
+  }
+  return workspaces.value.filter((workspace) =>
+    workspace.toLowerCase().includes(query)
   )
 })
 
@@ -764,6 +854,16 @@ const loadWorkflows = async () => {
   }
 }
 
+// Load workspaces list
+const loadWorkspaces = async () => {
+  const result = await fetchWorkspaces()
+  if (result.success) {
+    workspaces.value = result.workspaces
+  } else {
+    console.error('Failed to load workspaces:', result.error)
+  }
+}
+
 const openFileDropdown = () => {
   if (loading.value || isWorkflowRunning.value) {
     return
@@ -831,6 +931,64 @@ const handleFileInputBlur = () => {
   }, 120)
 }
 
+// Workspace selector handlers
+const openWorkspaceDropdown = () => {
+  isWorkspaceDropdownOpen.value = true
+}
+
+const closeWorkspaceDropdown = () => {
+  isWorkspaceDropdownOpen.value = false
+}
+
+const handleWorkspaceInputFocus = () => {
+  isWorkspaceSearchDirty.value = false
+  openWorkspaceDropdown()
+  if (workspaceSearchQuery.value?.trim()) {
+    nextTick(() => workspaceSelectorInputRef.value?.select())
+  }
+}
+
+const handleWorkspaceInputChange = () => {
+  if (isWorkflowRunning.value) {
+    return
+  }
+  isWorkspaceSearchDirty.value = true
+  openWorkspaceDropdown()
+}
+
+const selectWorkspace = (workspaceName) => {
+  selectedWorkspace.value = workspaceName || ''
+  workspaceSearchQuery.value = workspaceName || ''
+  isWorkspaceSearchDirty.value = false
+  closeWorkspaceDropdown()
+  workspaceSelectorInputRef.value?.blur()
+}
+
+const handleWorkspaceInputEnter = () => {
+  const query = workspaceSearchQuery.value.trim()
+  if (query) {
+    selectWorkspace(query)
+  } else {
+    const [firstMatch] = filteredWorkspaces.value
+    if (firstMatch) {
+      selectWorkspace(firstMatch)
+    }
+  }
+}
+
+const resetWorkspaceSearchQuery = () => {
+  workspaceSearchQuery.value = selectedWorkspace.value || ''
+  isWorkspaceSearchDirty.value = false
+}
+
+const handleWorkspaceInputBlur = () => {
+  setTimeout(() => {
+    if (!isWorkspaceDropdownOpen.value) {
+      resetWorkspaceSearchQuery()
+    }
+  }, 120)
+}
+
 const handleClickOutside = (event) => {
   if (
     isFileDropdownOpen.value &&
@@ -839,6 +997,14 @@ const handleClickOutside = (event) => {
   ) {
     closeFileDropdown()
     resetFileSearchQuery()
+  }
+  if (
+    isWorkspaceDropdownOpen.value &&
+    workspaceSelectorWrapperRef.value &&
+    !workspaceSelectorWrapperRef.value.contains(event.target)
+  ) {
+    closeWorkspaceDropdown()
+    resetWorkspaceSearchQuery()
   }
 }
 
@@ -1461,6 +1627,7 @@ onMounted(() => {
   document.addEventListener('click', handleClickOutside)
   document.addEventListener('keydown', handleKeydown)
   loadWorkflows()
+  loadWorkspaces()
 
   // Start the global timer
   if (!loadingTimerInterval) {
@@ -1715,15 +1882,20 @@ const launchWorkflow = async () => {
   status.value = 'Launching...'
 
   try {
+    const requestBody = {
+      yaml_file: selectedFile.value,
+      task_prompt: trimmedPrompt,
+      session_id: sessionId,
+      attachments: attachmentIds
+    }
+    // Include workspace if selected
+    if (selectedWorkspace.value) {
+      requestBody.workspace = selectedWorkspace.value
+    }
     const response = await fetch('/api/workflow/execute', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        yaml_file: selectedFile.value,
-        task_prompt: trimmedPrompt,
-        session_id: sessionId,
-        attachments: attachmentIds
-      })
+      body: JSON.stringify(requestBody)
     })
 
     if (response.ok) {
@@ -2088,12 +2260,39 @@ const processMessage = async (msg) => {
     }
   }
 
+  // Tool streaming output - real-time output from tools like uv_run
+  if (msg.type === 'tool_stream_output') {
+    const { node_id, tool_name, chunk, is_stderr } = msg.data
+    if (node_id && chunk) {
+      // Find the node state
+      const nodeState = nodesLoadingMessagesMap.get(node_id)
+      if (nodeState) {
+        // Find the most recent running entry for this tool
+        for (const entry of nodeState.entryMap.values()) {
+          if (entry.status === 'running' && entry.baseKey && entry.baseKey.includes('tool')) {
+            entry.liveOutput.push({ chunk, is_stderr, timestamp: Date.now() })
+            entry.totalOutput += chunk
+            // Defensive: cap frontend buffer at 200KB (should be limited by backend too)
+            const MAX_FRONTEND_OUTPUT = 204800
+            if (entry.totalOutput.length > MAX_FRONTEND_OUTPUT) {
+              const overflow = entry.totalOutput.length - MAX_FRONTEND_OUTPUT
+              entry.totalOutput = '\n... [output truncated] ...\n' + entry.totalOutput.slice(overflow + 50)
+            }
+            break
+          }
+        }
+      }
+    }
+  }
+
   // Workflow completed
   if (msg.type === 'workflow_completed') {
     addChatNotification(msg.data.summary)
     status.value = 'Completed'
     isWorkflowRunning.value = false
     sessionIdToDownload = sessionId
+    // Refresh workspaces list in case new workspace was created
+    loadWorkspaces()
   }
 
   // Handle direct error messages (e.g., workflow execution errors)
@@ -2558,6 +2757,47 @@ watch(
 .entry-done {
   border-color: rgba(255, 255, 255, 0.15);
   opacity: 0.8;
+}
+
+.entry-has-output {
+  cursor: pointer;
+}
+
+.entry-has-output:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.loading-entry-wrapper {
+  display: flex;
+  flex-direction: column;
+}
+
+.loading-entry-toggle {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+  margin-left: auto;
+  padding-left: 6px;
+}
+
+.live-output-panel {
+  margin-top: 4px;
+  margin-left: 8px;
+  background: #1a1a1a;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 10px 12px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.live-output-panel pre {
+  margin: 0;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #e0e0e0;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 /* Fade-slide-in animation for entries */
@@ -3028,6 +3268,17 @@ watch(
 
 .file-option:hover {
   background: rgba(255, 255, 255, 0.06);
+}
+
+.file-option-new {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 10px;
+  margin-bottom: 4px;
+}
+
+.file-option-new .file-desc {
+  color: #8ab4f8;
+  font-style: italic;
 }
 
 .file-name {
